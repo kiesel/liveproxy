@@ -23,25 +23,35 @@ func main() {
 	flag.Parse()
 
 	proxy := goproxy.NewProxyHttpServer()
-	// proxy.Verbose = true
+	report := make(chan *goproxy.ProxyCtx)
 
 	proxy.OnRequest(goproxy.ReqHostMatches(regexp.MustCompile("^.*$"))).
 		HandleConnectFunc(func(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
 			return goproxy.AlwaysMitm(host, ctx)
 		})
 
-	proxy.OnRequest(goproxy.ReqHostMatches(regexp.MustCompile("^.*$"))).
+	proxy.OnRequest().
 		DoFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-			fmt.Println("Open", r.URL)
-			fmt.Println("Session", ctx.Session)
+			report <- ctx
 			return r, nil
 		})
 
 	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
-		fmt.Println("Close", ctx.Req.URL)
-		fmt.Println("Session", ctx.Session)
+		report <- ctx
 		return r
 	})
+
+	go func() {
+		for {
+			ctx := <-report
+
+			if ctx.Resp != nil {
+				fmt.Println("Closing session", ctx.Session, "w/", ctx.Resp.StatusCode, "for", ctx.Req.URL)
+			} else {
+				fmt.Println("Opening session", ctx.Session, "for", ctx.Req.URL)
+			}
+		}
+	}()
 
 	fmt.Println(http.ListenAndServe(addr, proxy))
 }
