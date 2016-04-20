@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"regexp"
@@ -14,6 +15,16 @@ import (
 
 type Session struct {
 	Ctx *goproxy.ProxyCtx
+}
+
+func (this *Session) PrintTo(table io.Writer) {
+	fmt.Fprintf(table, "%d\t%s\t%s\t%d\t%d\n",
+		this.Ctx.Session,
+		"",
+		limitStrlen(this.Ctx.Req.URL.String(), 60),
+		0,
+		0,
+	)
 }
 
 var (
@@ -70,6 +81,8 @@ func main() {
 		return r
 	})
 
+	RedrawScreen()
+
 	go func() {
 		for {
 			ctx := <-report
@@ -97,16 +110,21 @@ func RedrawScreen() {
 	goterm.MoveCursor(0, 0)
 	goterm.Flush()
 
-	fmt.Println(goterm.Bold("Active connections"))
-	for _, ctx := range act_sessions {
-		fmt.Printf(" * [%v] @ %s\n", ctx.Ctx.Session, limitStrlen(ctx.Ctx.Req.URL.String(), 40))
-	}
+	goterm.Println(goterm.Bold("Active connections"))
+	table := goterm.NewTable(5, 4, 2, ' ', 0)
+	fmt.Fprintf(table, "ID\tSTAT\tURL\tSIZE\tTIME\n")
 
-	fmt.Println(goterm.Bold("Closed connections"))
+	for _, ctx := range act_sessions {
+		ctx.PrintTo(table)
+	}
 
 	for _, ctx := range hst_sessions {
-		fmt.Printf("   [%v] %d @ %s\n", ctx.Ctx.Session, ctx.Ctx.Resp.StatusCode, limitStrlen(ctx.Ctx.Req.URL.String(), 40))
+		ctx.PrintTo(table)
 	}
+
+	goterm.Println(table)
+	goterm.MoveCursor(0, 0)
+	goterm.Flush()
 }
 
 func limitStrlen(in string, limit int) string {
