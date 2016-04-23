@@ -8,23 +8,63 @@ import (
 	"io/ioutil"
 	"net/http"
 	"regexp"
+	"strconv"
+	"time"
 
 	"github.com/buger/goterm"
 	"gopkg.in/elazarl/goproxy.v1"
 )
 
 type Session struct {
-	Ctx *goproxy.ProxyCtx
+	Time time.Time
+	Ctx  *goproxy.ProxyCtx
 }
 
 func (this *Session) PrintTo(table io.Writer) {
-	fmt.Fprintf(table, "%d\t%s\t%s\t%d\t%d\n",
-		this.Ctx.Session,
-		"",
-		limitStrlen(this.Ctx.Req.URL.String(), 60),
-		0,
-		0,
+
+	if this.Ctx.Resp == nil {
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\n",
+			"-",
+			limitStrlen(this.Ctx.Req.URL.Host, 25),
+			limitStrlen(this.Ctx.Req.URL.Path, 40),
+			"-",
+			time.Since(this.Time).String(),
+		)
+
+		return
+	}
+
+	fmt.Fprintf(table, "%s\t%s\t%s\t%d\t%s\n",
+		this.coloredStatus(this.Ctx.Resp.StatusCode),
+		limitStrlen(this.Ctx.Req.URL.Host, 25),
+		limitStrlen(this.Ctx.Req.URL.Path, 40),
+		this.Ctx.Resp.ContentLength,
+		time.Since(this.Time).String(),
 	)
+}
+
+func (this *Session) coloredStatus(statusCode int) string {
+	status := strconv.Itoa(statusCode)
+
+	return status
+
+	if statusCode < 200 {
+		return goterm.Color(status, goterm.CYAN)
+	}
+
+	if statusCode >= 200 && statusCode < 300 {
+		return goterm.Color(status, goterm.GREEN)
+	}
+
+	if statusCode >= 300 && statusCode < 400 {
+		return goterm.Color(status, goterm.YELLOW)
+	}
+
+	if statusCode >= 400 && statusCode < 500 {
+		return goterm.Color(status, goterm.RED)
+	}
+
+	return goterm.Color(status, goterm.MAGENTA)
 }
 
 var (
@@ -88,14 +128,13 @@ func main() {
 			ctx := <-report
 
 			if ctx.Resp != nil {
-				fmt.Println("Closing session", ctx.Session, "w/", ctx.Resp.StatusCode, "for", ctx.Req.URL)
+				session := act_sessions[ctx.Session]
+				session.Ctx = ctx
 
-				hst_sessions[ctx.Session] = Session{Ctx: ctx}
+				hst_sessions[ctx.Session] = session
 				delete(act_sessions, ctx.Session)
 			} else {
-				act_sessions[ctx.Session] = Session{Ctx: ctx}
-
-				fmt.Println("Opening session", ctx.Session, "for", ctx.Req.URL)
+				act_sessions[ctx.Session] = Session{Time: time.Now(), Ctx: ctx}
 			}
 
 			RedrawScreen()
@@ -110,16 +149,22 @@ func RedrawScreen() {
 	goterm.MoveCursor(0, 0)
 	goterm.Flush()
 
+	height := goterm.Height() - 5
+
 	goterm.Println(goterm.Bold("Active connections"))
 	table := goterm.NewTable(5, 4, 2, ' ', 0)
-	fmt.Fprintf(table, "ID\tSTAT\tURL\tSIZE\tTIME\n")
+	fmt.Fprintf(table, "STATUS\tHOST\tPATH\tSIZE\tAGE\n")
 
 	for _, ctx := range act_sessions {
-		ctx.PrintTo(table)
+		if height > goterm.CurrentHeight() {
+			ctx.PrintTo(table)
+		}
 	}
 
 	for _, ctx := range hst_sessions {
-		ctx.PrintTo(table)
+		if height > goterm.CurrentHeight() {
+			ctx.PrintTo(table)
+		}
 	}
 
 	goterm.Println(table)
